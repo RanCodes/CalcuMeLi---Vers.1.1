@@ -103,7 +103,12 @@ def validate_excel_structure(df: pd.DataFrame, file_type: str) -> Tuple[bool, st
     if file_type == 'ml':
         required_cols = ['ITEM_ID', 'SKU', 'TITLE', 'QUANTITY', 'PRICE',
                         'CURRENCY_ID', 'FEE_PER_SALE_MARKETPLACE_V2',
-                        'COST_OF_FINANCING_MARKETPLACE', 'LISTING_TYPE_V3']
+                        'COST_OF_FINANCING_MARKETPLACE', 'LISTING_TYPE_V3',
+                        'SHIPPING_METHOD ']
+        shipping_variants = ['SHIPPING_METHOD ', 'SHIPPING_METHOD']
+        shipping_col = next((col for col in shipping_variants if col in df.columns), None)
+        if shipping_col and shipping_col != 'SHIPPING_METHOD ':
+            df.rename(columns={shipping_col: 'SHIPPING_METHOD '}, inplace=True)
     elif file_type == 'odoo':
         required_cols = ['Código Neored', 'Nombre', 'Cantidad a mano',
                         'Precio Tarifa', 'Impuestos del cliente']

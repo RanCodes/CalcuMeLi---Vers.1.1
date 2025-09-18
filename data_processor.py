@@ -181,17 +181,41 @@ def calcular(
         )
         df_calc['Recargo financiación (importe)'] = base_financiacion_precio * df_calc['financing_pct'].fillna(0)
 
-    # Calcular recargo de envío
+    # Identificar filas a las que se les debe aplicar recargo de envío
+    shipping_column = next(
+        (col for col in ['SHIPPING_METHOD ', 'SHIPPING_METHOD'] if col in df_calc.columns),
+        None
+    )
+    if shipping_column:
+        shipping_values = df_calc[shipping_column].fillna('').astype(str)
+        aplica_envio = shipping_values.str.contains(
+            'Mercado Envíos por mi cuenta',
+            case=False,
+            regex=False
+        )
+    else:
+        aplica_envio = pd.Series(False, index=df_calc.index, dtype=bool)
+
+    # Calcular recargo de envío solo para las filas aplicables
+    df_calc['Recargo envío ($)'] = 0.0
     tipo_envio = tipo_recargo_envio.lower() if isinstance(tipo_recargo_envio, str) else 'ninguno'
     if tipo_envio.startswith('fijo') and valor_recargo_envio:
-        df_calc['Recargo envío ($)'] = valor_recargo_envio
+        try:
+            monto_fijo = float(valor_recargo_envio)
+        except (TypeError, ValueError):
+            monto_fijo = 0.0
+        if monto_fijo != 0.0:
+            df_calc.loc[aplica_envio, 'Recargo envío ($)'] = monto_fijo
+        else:
+            df_calc.loc[aplica_envio, 'Recargo envío ($)'] = 0.0
     elif tipo_envio.startswith('porcentaje') and valor_recargo_envio:
-        pct_envio = valor_recargo_envio
+        try:
+            pct_envio = float(valor_recargo_envio)
+        except (TypeError, ValueError):
+            pct_envio = 0.0
         if pct_envio > 1:
             pct_envio = pct_envio / 100.0
-        df_calc['Recargo envío ($)'] = base_precio * pct_envio
-    else:
-        df_calc['Recargo envío ($)'] = 0.0
+        df_calc.loc[aplica_envio, 'Recargo envío ($)'] = base_precio[aplica_envio] * pct_envio
 
     # Calcular subtotal antes de impuestos indirectos
     subtotal = (
