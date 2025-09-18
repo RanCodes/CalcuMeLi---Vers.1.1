@@ -1,5 +1,6 @@
 import pandas as pd
 import io
+from math import isclose
 from data_processor import leer_ml, leer_odoo, unir_y_validar, calcular, preparar_resultado_final, exportar_excel
 
 def crear_datos_ejemplo():
@@ -83,8 +84,16 @@ def test_procesamiento():
             print(f"  - {row['SKU']}: {row['TITLE'][:50]}...")
     print("\n💰 Calculando precios (base: tarifa, sin impuestos)...")
     df_calculated = calcular(df_merged, base_financiacion='tarifa', incluir_impuestos=False)
+    assert 'VALUE_ADDED_TAX' in df_calculated.columns
+    producto_led = df_calculated[df_calculated['SKU'] == 'LED7012795'].iloc[0]
+    assert isclose(producto_led['VALUE_ADDED_TAX'], 4833.68, rel_tol=1e-04)
+    assert isclose(producto_led['Precio final'], 27851.17, rel_tol=1e-04)
     print("\n📋 Preparando resultado final...")
     df_resultado = preparar_resultado_final(df_calculated, incluir_impuestos=False)
+    assert 'VALUE_ADDED_TAX' in df_resultado.columns
+    resultado_led = df_resultado[df_resultado['SKU'] == 'LED7012795'].iloc[0]
+    assert isclose(resultado_led['VALUE_ADDED_TAX'], 4833.68, rel_tol=1e-04)
+    assert isclose(resultado_led['Precio final'], 27851.17, rel_tol=1e-04)
     print("✅ Procesamiento completado")
     print("\n📊 RESULTADOS DETALLADOS:")
     print("=" * 50)
@@ -108,7 +117,15 @@ def test_procesamiento():
     print("🧪 PRUEBA CON IMPUESTOS INCLUIDOS")
     print("=" * 50)
     df_calculated_tax = calcular(df_merged, base_financiacion='tarifa', incluir_impuestos=True)
+    assert 'VALUE_ADDED_TAX' in df_calculated_tax.columns
+    producto_led_tax = df_calculated_tax[df_calculated_tax['SKU'] == 'LED7012795'].iloc[0]
+    assert isclose(producto_led_tax['VALUE_ADDED_TAX'], 5800.46, rel_tol=1e-04)
+    assert isclose(producto_led_tax['Precio final'], 33421.68, rel_tol=1e-04)
     df_resultado_tax = preparar_resultado_final(df_calculated_tax, incluir_impuestos=True)
+    assert 'VALUE_ADDED_TAX' in df_resultado_tax.columns
+    resultado_led_tax = df_resultado_tax[df_resultado_tax['SKU'] == 'LED7012795'].iloc[0]
+    assert isclose(resultado_led_tax['VALUE_ADDED_TAX'], 5800.46, rel_tol=1e-04)
+    assert isclose(resultado_led_tax['Precio final'], 33421.68, rel_tol=1e-04)
     print("\n📊 Comparación con y sin impuestos (primeros 3 items):")
     comparacion_cols = ['SKU', 'Precio de Tarifa', 'Tarifa + impuestos', 'Precio final']
     df_comp = df_resultado_tax[df_resultado_tax['Precio final'] > 0][comparacion_cols].head(3)
