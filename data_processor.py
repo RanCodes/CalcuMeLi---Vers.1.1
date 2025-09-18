@@ -227,8 +227,8 @@ def calcular(
     )
 
     # Calcular IVA y precio final
-    df_calc['VALUE_ADDED_TAX'] = subtotal * 0.21
-    df_calc['Precio final'] = subtotal + df_calc['VALUE_ADDED_TAX']
+    df_calc['IVA'] = subtotal * 0.21
+    df_calc['Precio final'] = subtotal + df_calc['IVA']
 
     # Redondear a 2 decimales
     numeric_cols = [
@@ -238,7 +238,7 @@ def calcular(
         'Recargo fijo ML ($)',
         'Recargo financiación (importe)',
         'Recargo envío ($)',
-        'VALUE_ADDED_TAX',
+        'IVA',
         'Precio final'
     ]
     for col in numeric_cols:
@@ -282,7 +282,7 @@ def preparar_resultado_final(
     # Columnas comunes de resultados
     columnas_finales.extend([
         'Precio final',
-        'VALUE_ADDED_TAX',
+        'IVA',
         'Recargo % ML (importe)',
         'Recargo fijo ML ($)',
         'Recargo financiación (importe)'
@@ -317,7 +317,7 @@ def preparar_resultado_final(
         df_resultado['Tarifa + impuestos'] = df_calc['Tarifa + impuestos']
 
     df_resultado['Precio final'] = df_calc['Precio final']
-    df_resultado['VALUE_ADDED_TAX'] = df_calc['VALUE_ADDED_TAX']
+    df_resultado['IVA'] = df_calc['IVA']
     df_resultado['Recargo % ML (importe)'] = df_calc['Recargo % ML (importe)']
     df_resultado['Recargo fijo ML ($)'] = df_calc['Recargo fijo ML ($)']
     df_resultado['Recargo financiación (importe)'] = df_calc['Recargo financiación (importe)']
