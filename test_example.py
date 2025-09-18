@@ -105,14 +105,22 @@ def test_procesamiento():
     df_calculated = calcular(df_merged, base_financiacion='tarifa', incluir_impuestos=False)
     assert 'IVA' in df_calculated.columns
     producto_led = df_calculated[df_calculated['SKU'] == 'LED7012795'].iloc[0]
-    assert isclose(producto_led['IVA'], 4833.68, rel_tol=1e-04)
-    assert isclose(producto_led['Precio final'], 27851.17, rel_tol=1e-04)
+    assert isclose(producto_led['Recargo % ML (importe)'], 3486.23, rel_tol=1e-04)
+    assert isclose(producto_led['Cargo por vender ($)'], 4581.23, rel_tol=1e-04)
+    assert isclose(producto_led['Recargo financiación (importe)'], 961.72, rel_tol=1e-04)
+    assert isclose(producto_led['Retenciones ML ($)'], 0.0, abs_tol=1e-09)
+    assert isclose(producto_led['Recibis ($)'], 18500.0, rel_tol=1e-04)
+    assert isclose(producto_led['IVA'], 4172.74, rel_tol=1e-04)
+    assert isclose(producto_led['Precio final'], 24042.94, rel_tol=1e-04)
     print("\n📋 Preparando resultado final...")
     df_resultado = preparar_resultado_final(df_calculated, incluir_impuestos=False)
     assert 'IVA' in df_resultado.columns
     resultado_led = df_resultado[df_resultado['SKU'] == 'LED7012795'].iloc[0]
-    assert isclose(resultado_led['IVA'], 4833.68, rel_tol=1e-04)
-    assert isclose(resultado_led['Precio final'], 27851.17, rel_tol=1e-04)
+    assert isclose(resultado_led['Cargo por vender ($)'], 4581.23, rel_tol=1e-04)
+    assert isclose(resultado_led['Retenciones ML ($)'], 0.0, abs_tol=1e-09)
+    assert isclose(resultado_led['Recibis ($)'], 18500.0, rel_tol=1e-04)
+    assert isclose(resultado_led['IVA'], 4172.74, rel_tol=1e-04)
+    assert isclose(resultado_led['Precio final'], 24042.94, rel_tol=1e-04)
     print("✅ Procesamiento completado")
     print("\n📊 RESULTADOS DETALLADOS:")
     print("=" * 50)
@@ -138,13 +146,20 @@ def test_procesamiento():
     df_calculated_tax = calcular(df_merged, base_financiacion='tarifa', incluir_impuestos=True)
     assert 'IVA' in df_calculated_tax.columns
     producto_led_tax = df_calculated_tax[df_calculated_tax['SKU'] == 'LED7012795'].iloc[0]
-    assert isclose(producto_led_tax['IVA'], 5800.46, rel_tol=1e-04)
-    assert isclose(producto_led_tax['Precio final'], 33421.68, rel_tol=1e-04)
+    assert isclose(producto_led_tax['Recargo % ML (importe)'], 4177.42, rel_tol=1e-04)
+    assert isclose(producto_led_tax['Cargo por vender ($)'], 5272.42, rel_tol=1e-04)
+    assert isclose(producto_led_tax['Recargo financiación (importe)'], 1152.39, rel_tol=1e-04)
+    assert isclose(producto_led_tax['Recibis ($)'], 22385.0, rel_tol=1e-04)
+    assert isclose(producto_led_tax['IVA'], 5000.05, rel_tol=1e-04)
+    assert isclose(producto_led_tax['Precio final'], 28809.82, rel_tol=1e-04)
     df_resultado_tax = preparar_resultado_final(df_calculated_tax, incluir_impuestos=True)
     assert 'IVA' in df_resultado_tax.columns
     resultado_led_tax = df_resultado_tax[df_resultado_tax['SKU'] == 'LED7012795'].iloc[0]
-    assert isclose(resultado_led_tax['IVA'], 5800.46, rel_tol=1e-04)
-    assert isclose(resultado_led_tax['Precio final'], 33421.68, rel_tol=1e-04)
+    assert isclose(resultado_led_tax['Cargo por vender ($)'], 5272.42, rel_tol=1e-04)
+    assert isclose(resultado_led_tax['Retenciones ML ($)'], 0.0, abs_tol=1e-09)
+    assert isclose(resultado_led_tax['Recibis ($)'], 22385.0, rel_tol=1e-04)
+    assert isclose(resultado_led_tax['IVA'], 5000.05, rel_tol=1e-04)
+    assert isclose(resultado_led_tax['Precio final'], 28809.82, rel_tol=1e-04)
     print("\n📊 Comparación con y sin impuestos (primeros 3 items):")
     comparacion_cols = ['SKU', 'Precio de Tarifa', 'Tarifa + impuestos', 'Precio final']
     df_comp = df_resultado_tax[df_resultado_tax['Precio final'] > 0][comparacion_cols].head(3)
