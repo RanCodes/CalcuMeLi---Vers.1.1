@@ -1,9 +1,12 @@
 import pandas as pd
-import numpy as np
-from typing import Optional
 from utils import (
-    parse_fee_combo, parse_pct, parse_money, clean_ml_data,
-    validate_excel_structure, extract_tax_percentage
+    parse_fee_combo,
+    parse_pct,
+    parse_money,
+    clean_ml_data,
+    validate_excel_structure,
+    extract_tax_percentage,
+    calcular_precio_publicacion_ml,
 )
 
 def leer_ml(file_path_or_buffer) -> pd.DataFrame:
@@ -146,40 +149,34 @@ def calcular(
     """
     df_calc = df.copy()
 
-    # Inicializar columnas de cálculo
-    df_calc['Precio de Tarifa'] = df_calc['Precio Tarifa'].fillna(0)
-    df_calc['Tarifa + impuestos'] = 0.0
+    if 'Notas/Flags' not in df_calc.columns:
+        df_calc['Notas/Flags'] = ''
+    df_calc['Notas/Flags'] = df_calc['Notas/Flags'].fillna('')
+
+    df_calc['Precio de Tarifa'] = pd.to_numeric(
+        df_calc['Precio Tarifa'], errors='coerce'
+    ).fillna(0.0)
+
+    tax_pct = pd.to_numeric(df_calc.get('tax_pct', 0.0), errors='coerce').fillna(0.0)
+    tarifa_base = df_calc['Precio de Tarifa']
+    tarifa_con_impuestos = tarifa_base * (1 + tax_pct)
+    if incluir_impuestos:
+        tarifa_neta_base = tarifa_con_impuestos
+        df_calc['Tarifa + impuestos'] = tarifa_con_impuestos
+    else:
+        tarifa_neta_base = tarifa_base
+        df_calc['Tarifa + impuestos'] = tarifa_con_impuestos
+
+    # Inicializar columnas
     df_calc['Recargo % ML (importe)'] = 0.0
     df_calc['Recargo fijo ML ($)'] = 0.0
+    df_calc['Cargo por vender ($)'] = 0.0
     df_calc['Recargo financiación (importe)'] = 0.0
     df_calc['Recargo envío ($)'] = 0.0
+    df_calc['Retenciones ML ($)'] = 0.0
+    df_calc['Recibis ($)'] = 0.0
+    df_calc['IVA'] = 0.0
     df_calc['Precio final'] = 0.0
-
-    # Calcular tarifa con impuestos si está habilitado
-    if incluir_impuestos:
-        df_calc['Tarifa + impuestos'] = df_calc['Precio de Tarifa'] * (1 + df_calc['tax_pct'].fillna(0))
-        base_precio = df_calc['Tarifa + impuestos']
-    else:
-        df_calc['Tarifa + impuestos'] = df_calc['Precio de Tarifa']
-        base_precio = df_calc['Precio de Tarifa']
-
-    # Calcular recargo porcentual ML
-    df_calc['Recargo % ML (importe)'] = base_precio * df_calc['fee_pct'].fillna(0)
-    # Recargo fijo ML
-    df_calc['Recargo fijo ML ($)'] = df_calc['fee_fixed'].fillna(0)
-
-    # Calcular recargo financiación según la base elegida
-    if base_financiacion == 'tarifa':
-        # Base: solo tarifa (con o sin impuestos)
-        df_calc['Recargo financiación (importe)'] = base_precio * df_calc['financing_pct'].fillna(0)
-    else:  # 'tarifa_mas_ml'
-        # Base: tarifa + recargo ML (% + fijo)
-        base_financiacion_precio = (
-            base_precio +
-            df_calc['Recargo % ML (importe)'] +
-            df_calc['Recargo fijo ML ($)']
-        )
-        df_calc['Recargo financiación (importe)'] = base_financiacion_precio * df_calc['financing_pct'].fillna(0)
 
     # Identificar filas a las que se les debe aplicar recargo de envío
     shipping_column = next(
@@ -197,7 +194,6 @@ def calcular(
         aplica_envio = pd.Series(False, index=df_calc.index, dtype=bool)
 
     # Calcular recargo de envío solo para las filas aplicables
-    df_calc['Recargo envío ($)'] = 0.0
     tipo_envio = tipo_recargo_envio.lower() if isinstance(tipo_recargo_envio, str) else 'ninguno'
     if tipo_envio.startswith('fijo') and valor_recargo_envio:
         try:
@@ -215,20 +211,66 @@ def calcular(
             pct_envio = 0.0
         if pct_envio > 1:
             pct_envio = pct_envio / 100.0
-        df_calc.loc[aplica_envio, 'Recargo envío ($)'] = base_precio[aplica_envio] * pct_envio
+        df_calc.loc[aplica_envio, 'Recargo envío ($)'] = tarifa_neta_base[aplica_envio] * pct_envio
 
-    # Calcular subtotal antes de impuestos indirectos
-    subtotal = (
-        base_precio +
-        df_calc['Recargo % ML (importe)'] +
-        df_calc['Recargo fijo ML ($)'] +
-        df_calc['Recargo financiación (importe)'] +
-        df_calc['Recargo envío ($)']
+    tarifa_objetivo = tarifa_neta_base + df_calc['Recargo envío ($)']
+
+    fee_pct = pd.to_numeric(df_calc.get('fee_pct', 0.0), errors='coerce').fillna(0.0)
+    fee_fixed = pd.to_numeric(df_calc.get('fee_fixed', 0.0), errors='coerce').fillna(0.0)
+    financing_pct = pd.to_numeric(df_calc.get('financing_pct', 0.0), errors='coerce').fillna(0.0)
+    if 'retenciones_pct' in df_calc.columns:
+        retenciones_pct = pd.to_numeric(df_calc['retenciones_pct'], errors='coerce').fillna(0.0)
+    else:
+        retenciones_pct = pd.Series(0.0, index=df_calc.index)
+
+    calculos = [
+        calcular_precio_publicacion_ml(
+            tarifa_neta=tarifa_objetivo.iat[idx],
+            porcentaje_comision=fee_pct.iat[idx],
+            porcentaje_financiacion=financing_pct.iat[idx],
+            porcentaje_retenciones=retenciones_pct.iat[idx],
+            costo_fijo=fee_fixed.iat[idx],
+        )
+        for idx in range(len(df_calc))
+    ]
+
+    calculos_df = pd.DataFrame(
+        calculos,
+        columns=[
+            'Precio final',
+            'Cargo por vender ($)',
+            'Recargo financiación (importe)',
+            'Retenciones ML ($)',
+            'Recibis ($)',
+            'Denominador inválido',
+        ],
+        index=df_calc.index,
     )
 
-    # Calcular IVA y precio final
-    df_calc['IVA'] = subtotal * 0.21
-    df_calc['Precio final'] = subtotal + df_calc['IVA']
+    df_calc['Precio final'] = calculos_df['Precio final']
+    df_calc['Cargo por vender ($)'] = calculos_df['Cargo por vender ($)']
+    df_calc['Recargo financiación (importe)'] = calculos_df['Recargo financiación (importe)']
+    df_calc['Retenciones ML ($)'] = calculos_df['Retenciones ML ($)']
+    df_calc['Recibis ($)'] = calculos_df['Recibis ($)']
+    df_calc['Recargo fijo ML ($)'] = fee_fixed
+    df_calc['Recargo % ML (importe)'] = df_calc['Precio final'] * fee_pct
+
+    invalid_mask = calculos_df['Denominador inválido']
+    if invalid_mask.any():
+        mensaje = 'Porcentajes ML sin solución (denominador <= 0)'
+        df_calc.loc[invalid_mask, 'Notas/Flags'] = df_calc.loc[invalid_mask, 'Notas/Flags'].apply(
+            lambda x: mensaje if not x else f"{x}; {mensaje}"
+        )
+        df_calc.loc[invalid_mask, 'Recargo fijo ML ($)'] = 0.0
+
+    df_calc['IVA'] = 0.0
+    positive_tax = tax_pct > 0
+    if positive_tax.any():
+        df_calc.loc[positive_tax, 'IVA'] = (
+            df_calc.loc[positive_tax, 'Precio final']
+            * tax_pct[positive_tax]
+            / (1 + tax_pct[positive_tax])
+        )
 
     # Redondear a 2 decimales
     numeric_cols = [
@@ -236,17 +278,20 @@ def calcular(
         'Tarifa + impuestos',
         'Recargo % ML (importe)',
         'Recargo fijo ML ($)',
+        'Cargo por vender ($)',
         'Recargo financiación (importe)',
         'Recargo envío ($)',
+        'Retenciones ML ($)',
+        'Recibis ($)',
         'IVA',
-        'Precio final'
+        'Precio final',
     ]
     for col in numeric_cols:
         df_calc[col] = df_calc[col].round(2)
 
     # Preparar columnas adicionales
-    df_calc['% ML aplicado'] = (df_calc['fee_pct'] * 100).round(2)
-    df_calc['% financiación aplicado'] = (df_calc['financing_pct'] * 100).round(2)
+    df_calc['% ML aplicado'] = (fee_pct * 100).round(2)
+    df_calc['% financiación aplicado'] = (financing_pct * 100).round(2)
 
     return df_calc
 
@@ -285,7 +330,10 @@ def preparar_resultado_final(
         'IVA',
         'Recargo % ML (importe)',
         'Recargo fijo ML ($)',
-        'Recargo financiación (importe)'
+        'Cargo por vender ($)',
+        'Recargo financiación (importe)',
+        'Retenciones ML ($)',
+        'Recibis ($)'
     ])
 
     # Añadir recargo de envío si corresponde
@@ -320,7 +368,10 @@ def preparar_resultado_final(
     df_resultado['IVA'] = df_calc['IVA']
     df_resultado['Recargo % ML (importe)'] = df_calc['Recargo % ML (importe)']
     df_resultado['Recargo fijo ML ($)'] = df_calc['Recargo fijo ML ($)']
+    df_resultado['Cargo por vender ($)'] = df_calc['Cargo por vender ($)']
     df_resultado['Recargo financiación (importe)'] = df_calc['Recargo financiación (importe)']
+    df_resultado['Retenciones ML ($)'] = df_calc['Retenciones ML ($)']
+    df_resultado['Recibis ($)'] = df_calc['Recibis ($)']
     if incluir_envio:
         df_resultado['Recargo envío ($)'] = df_calc['Recargo envío ($)']
     df_resultado['% ML aplicado'] = df_calc['% ML aplicado']

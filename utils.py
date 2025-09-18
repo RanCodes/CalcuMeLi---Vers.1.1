@@ -131,3 +131,55 @@ def extract_tax_percentage(tax_text: str) -> float:
     if match:
         return float(match.group(1)) / 100.0
     return 0.0
+
+
+def calcular_precio_publicacion_ml(
+    tarifa_neta: float,
+    porcentaje_comision: float,
+    porcentaje_financiacion: float,
+    porcentaje_retenciones: float,
+    costo_fijo: float,
+) -> Tuple[float, float, float, float, float, bool]:
+    """Calcula el precio de publicación necesario para alcanzar una tarifa neta.
+
+    Args:
+        tarifa_neta: Importe neto que se necesita recibir (tarifa + recargos).
+        porcentaje_comision: Porcentaje de comisión de MercadoLibre (en decimal).
+        porcentaje_financiacion: Porcentaje del costo por ofrecer cuotas (en decimal).
+        porcentaje_retenciones: Porcentaje de retenciones aplicables (en decimal).
+        costo_fijo: Cargo fijo cobrado por MercadoLibre.
+
+    Returns:
+        Una tupla con (precio_publicacion, cargo_por_vender, costo_por_ofrecer_cuotas,
+        retenciones, recibis, denominador_invalido).
+    """
+
+    tarifa_neta = float(tarifa_neta or 0.0)
+    porcentaje_comision = float(porcentaje_comision or 0.0)
+    porcentaje_financiacion = float(porcentaje_financiacion or 0.0)
+    porcentaje_retenciones = float(porcentaje_retenciones or 0.0)
+    costo_fijo = float(costo_fijo or 0.0)
+
+    total_porcentual = (
+        porcentaje_comision + porcentaje_financiacion + porcentaje_retenciones
+    )
+    denominador = 1.0 - total_porcentual
+    if denominador <= 0:
+        return 0.0, 0.0, 0.0, 0.0, 0.0, True
+
+    precio_publicacion = (tarifa_neta + costo_fijo) / denominador
+    cargo_por_vender = precio_publicacion * porcentaje_comision + costo_fijo
+    costo_por_ofrecer_cuotas = precio_publicacion * porcentaje_financiacion
+    retenciones = precio_publicacion * porcentaje_retenciones
+    recibis = precio_publicacion - (
+        cargo_por_vender + costo_por_ofrecer_cuotas + retenciones
+    )
+
+    return (
+        precio_publicacion,
+        cargo_por_vender,
+        costo_por_ofrecer_cuotas,
+        retenciones,
+        recibis,
+        False,
+    )
