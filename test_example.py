@@ -3,6 +3,7 @@ import io
 from math import isclose
 from openpyxl import load_workbook
 from data_processor import leer_ml, leer_odoo, unir_y_validar, calcular, preparar_resultado_final, exportar_excel
+from utils import calcular_precio_publicacion_ml
 
 def crear_datos_ejemplo():
     """
@@ -104,23 +105,50 @@ def test_procesamiento():
     print("\n💰 Calculando precios (base: tarifa, sin impuestos)...")
     df_calculated = calcular(df_merged, base_financiacion='tarifa', incluir_impuestos=False)
     assert 'IVA' in df_calculated.columns
+
     producto_led = df_calculated[df_calculated['SKU'] == 'LED7012795'].iloc[0]
-    assert isclose(producto_led['Recargo % ML (importe)'], 3486.23, rel_tol=1e-04)
-    assert isclose(producto_led['Cargo por vender ($)'], 4581.23, rel_tol=1e-04)
-    assert isclose(producto_led['Recargo financiación (importe)'], 961.72, rel_tol=1e-04)
-    assert isclose(producto_led['Retenciones ML ($)'], 0.0, abs_tol=1e-09)
-    assert isclose(producto_led['Recibis ($)'], 18500.0, rel_tol=1e-04)
-    assert isclose(producto_led['IVA'], 4172.74, rel_tol=1e-04)
-    assert isclose(producto_led['Precio final'], 24042.94, rel_tol=1e-04)
+    tarifa_led = float(df_odoo.loc[df_odoo['Código Neored'] == 'LED7012795', 'Precio Tarifa'].iloc[0])
+    fee_pct_led = float(df_ml.loc[df_ml['SKU'] == 'LED7012795', 'fee_pct'].iloc[0])
+    fee_fixed_led = float(df_ml.loc[df_ml['SKU'] == 'LED7012795', 'fee_fixed'].iloc[0])
+    financing_pct_led = float(df_ml.loc[df_ml['SKU'] == 'LED7012795', 'financing_pct'].iloc[0])
+    tax_pct_led = float(df_odoo.loc[df_odoo['Código Neored'] == 'LED7012795', 'tax_pct'].iloc[0])
+
+    (
+        precio_led,
+        cargo_led,
+        cuotas_led,
+        ret_led,
+        recibis_led,
+        denominador_invalido,
+    ) = calcular_precio_publicacion_ml(
+        tarifa_neta=tarifa_led,
+        porcentaje_comision=fee_pct_led,
+        porcentaje_financiacion=financing_pct_led,
+        porcentaje_retenciones=0.0,
+        costo_fijo=fee_fixed_led,
+    )
+    assert not denominador_invalido
+
+    iva_led = precio_led * tax_pct_led / (1 + tax_pct_led)
+    recargo_pct_led = precio_led * fee_pct_led
+
+    assert isclose(producto_led['Precio final'], precio_led, rel_tol=1e-04)
+    assert isclose(producto_led['Cargo por vender ($)'], cargo_led, rel_tol=1e-04)
+    assert isclose(producto_led['Recargo financiación (importe)'], cuotas_led, rel_tol=1e-04)
+    assert isclose(producto_led['Retenciones ML ($)'], ret_led, rel_tol=1e-04)
+    assert isclose(producto_led['Recibis ($)'], recibis_led, rel_tol=1e-04)
+    assert isclose(producto_led['Recargo % ML (importe)'], recargo_pct_led, rel_tol=1e-04)
+    assert isclose(producto_led['Recargo fijo ML ($)'], fee_fixed_led, rel_tol=1e-04)
+    assert isclose(producto_led['IVA'], iva_led, rel_tol=1e-04)
     print("\n📋 Preparando resultado final...")
     df_resultado = preparar_resultado_final(df_calculated, incluir_impuestos=False)
     assert 'IVA' in df_resultado.columns
     resultado_led = df_resultado[df_resultado['SKU'] == 'LED7012795'].iloc[0]
-    assert isclose(resultado_led['Cargo por vender ($)'], 4581.23, rel_tol=1e-04)
-    assert isclose(resultado_led['Retenciones ML ($)'], 0.0, abs_tol=1e-09)
-    assert isclose(resultado_led['Recibis ($)'], 18500.0, rel_tol=1e-04)
-    assert isclose(resultado_led['IVA'], 4172.74, rel_tol=1e-04)
-    assert isclose(resultado_led['Precio final'], 24042.94, rel_tol=1e-04)
+    assert isclose(resultado_led['Cargo por vender ($)'], cargo_led, rel_tol=1e-04)
+    assert isclose(resultado_led['Retenciones ML ($)'], ret_led, rel_tol=1e-04)
+    assert isclose(resultado_led['Recibis ($)'], recibis_led, rel_tol=1e-04)
+    assert isclose(resultado_led['IVA'], iva_led, rel_tol=1e-04)
+    assert isclose(resultado_led['Precio final'], precio_led, rel_tol=1e-04)
     print("✅ Procesamiento completado")
     print("\n📊 RESULTADOS DETALLADOS:")
     print("=" * 50)
@@ -135,6 +163,8 @@ def test_procesamiento():
             print(f"   - Recargo % ML ({row['% ML aplicado']:.1f}%): ${row['Recargo % ML (importe)']:,.2f}")
             print(f"   - Recargo fijo ML: ${row['Recargo fijo ML ($)']:,.2f}")
             print(f"   - Recargo financiación ({row['% financiación aplicado']:.1f}%): ${row['Recargo financiación (importe)']:,.2f}")
+            print(f"   - Retenciones ML: ${row['Retenciones ML ($)']:,.2f}")
+            print(f"   - Recibís neto: ${row['Recibis ($)']:,.2f}")
             if 'Recargo envío ($)' in df_resultado.columns:
                 print(f"   - Recargo envío: ${row.get('Recargo envío ($)', 0):,.2f}")
             print(f"📋 Tipo: {row['Tipo de publicación']}")
@@ -146,20 +176,40 @@ def test_procesamiento():
     df_calculated_tax = calcular(df_merged, base_financiacion='tarifa', incluir_impuestos=True)
     assert 'IVA' in df_calculated_tax.columns
     producto_led_tax = df_calculated_tax[df_calculated_tax['SKU'] == 'LED7012795'].iloc[0]
-    assert isclose(producto_led_tax['Recargo % ML (importe)'], 4177.42, rel_tol=1e-04)
-    assert isclose(producto_led_tax['Cargo por vender ($)'], 5272.42, rel_tol=1e-04)
-    assert isclose(producto_led_tax['Recargo financiación (importe)'], 1152.39, rel_tol=1e-04)
-    assert isclose(producto_led_tax['Recibis ($)'], 22385.0, rel_tol=1e-04)
-    assert isclose(producto_led_tax['IVA'], 5000.05, rel_tol=1e-04)
-    assert isclose(producto_led_tax['Precio final'], 28809.82, rel_tol=1e-04)
+    (
+        precio_led_tax,
+        cargo_led_tax,
+        cuotas_led_tax,
+        ret_led_tax,
+        recibis_led_tax,
+        denominador_invalido_tax,
+    ) = calcular_precio_publicacion_ml(
+        tarifa_neta=tarifa_led * (1 + tax_pct_led),
+        porcentaje_comision=fee_pct_led,
+        porcentaje_financiacion=financing_pct_led,
+        porcentaje_retenciones=0.0,
+        costo_fijo=fee_fixed_led,
+    )
+    assert not denominador_invalido_tax
+
+    iva_led_tax = precio_led_tax * tax_pct_led / (1 + tax_pct_led)
+    recargo_pct_led_tax = precio_led_tax * fee_pct_led
+
+    assert isclose(producto_led_tax['Precio final'], precio_led_tax, rel_tol=1e-04)
+    assert isclose(producto_led_tax['Cargo por vender ($)'], cargo_led_tax, rel_tol=1e-04)
+    assert isclose(producto_led_tax['Recargo financiación (importe)'], cuotas_led_tax, rel_tol=1e-04)
+    assert isclose(producto_led_tax['Retenciones ML ($)'], ret_led_tax, rel_tol=1e-04)
+    assert isclose(producto_led_tax['Recibis ($)'], recibis_led_tax, rel_tol=1e-04)
+    assert isclose(producto_led_tax['Recargo % ML (importe)'], recargo_pct_led_tax, rel_tol=1e-04)
+    assert isclose(producto_led_tax['IVA'], iva_led_tax, rel_tol=1e-04)
     df_resultado_tax = preparar_resultado_final(df_calculated_tax, incluir_impuestos=True)
     assert 'IVA' in df_resultado_tax.columns
     resultado_led_tax = df_resultado_tax[df_resultado_tax['SKU'] == 'LED7012795'].iloc[0]
-    assert isclose(resultado_led_tax['Cargo por vender ($)'], 5272.42, rel_tol=1e-04)
-    assert isclose(resultado_led_tax['Retenciones ML ($)'], 0.0, abs_tol=1e-09)
-    assert isclose(resultado_led_tax['Recibis ($)'], 22385.0, rel_tol=1e-04)
-    assert isclose(resultado_led_tax['IVA'], 5000.05, rel_tol=1e-04)
-    assert isclose(resultado_led_tax['Precio final'], 28809.82, rel_tol=1e-04)
+    assert isclose(resultado_led_tax['Cargo por vender ($)'], cargo_led_tax, rel_tol=1e-04)
+    assert isclose(resultado_led_tax['Retenciones ML ($)'], ret_led_tax, rel_tol=1e-04)
+    assert isclose(resultado_led_tax['Recibis ($)'], recibis_led_tax, rel_tol=1e-04)
+    assert isclose(resultado_led_tax['IVA'], iva_led_tax, rel_tol=1e-04)
+    assert isclose(resultado_led_tax['Precio final'], precio_led_tax, rel_tol=1e-04)
     print("\n📊 Comparación con y sin impuestos (primeros 3 items):")
     comparacion_cols = ['SKU', 'Precio de Tarifa', 'Tarifa + impuestos', 'Precio final']
     df_comp = df_resultado_tax[df_resultado_tax['Precio final'] > 0][comparacion_cols].head(3)
@@ -199,6 +249,38 @@ def test_procesamiento():
         print(f"Recargo promedio %: {porcentaje_recargo:.1f}%")
     print("\n🎉 ¡Prueba completada exitosamente!")
     return df_resultado
+
+
+def test_calcular_precio_publicacion_ml():
+    """Valida el cálculo directo del precio de publicación."""
+
+    tarifa_neta = 12513.10
+    porcentaje_comision = 0.145
+    porcentaje_financiacion = 0.04
+    porcentaje_retenciones = 0.01
+    costo_fijo = 2190.0
+
+    (
+        precio_publicacion,
+        cargo_por_vender,
+        recargo_financiacion,
+        retenciones,
+        recibis,
+        denominador_invalido,
+    ) = calcular_precio_publicacion_ml(
+        tarifa_neta=tarifa_neta,
+        porcentaje_comision=porcentaje_comision,
+        porcentaje_financiacion=porcentaje_financiacion,
+        porcentaje_retenciones=porcentaje_retenciones,
+        costo_fijo=costo_fijo,
+    )
+
+    assert not denominador_invalido
+    assert isclose(precio_publicacion, 18264.72, rel_tol=1e-04)
+    assert isclose(recibis, tarifa_neta, rel_tol=1e-06)
+    # Validar que los componentes sumen correctamente
+    total_descuentos = cargo_por_vender + recargo_financiacion + retenciones
+    assert isclose(precio_publicacion - total_descuentos, tarifa_neta, rel_tol=1e-06)
 
 def test_recargo_envio_fijo_aplica_solo_a_envios_por_cuenta_propia():
     df_merged = preparar_df_para_calculo()
