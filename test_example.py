@@ -30,7 +30,14 @@ def crear_datos_ejemplo():
             '16.00% + $1200.00'
         ],
         'COST_OF_FINANCING_MARKETPLACE': ['4.00%', '3.50%', '0.00%', '5.00%', '4.50%'],
-        'LISTING_TYPE_V3': ['gold_special', 'gold_pro', 'free', 'gold_special', 'gold_pro']
+        'LISTING_TYPE_V3': ['gold_special', 'gold_pro', 'free', 'gold_special', 'gold_pro'],
+        'SHIPPING_METHOD ': [
+            'Mercado Envíos por mi cuenta',
+            'Mercado Envíos Clásico',
+            'Mercado envíos POR MI CUENTA (Flex)',
+            None,
+            'Retiro en tienda'
+        ]
     }
 
     # Datos de ejemplo Odoo
@@ -51,6 +58,17 @@ def crear_datos_ejemplo():
     df_ml = pd.DataFrame(ml_data)
     df_odoo = pd.DataFrame(odoo_data)
     return df_ml, df_odoo
+
+def preparar_df_para_calculo():
+    """Prepara un DataFrame unido listo para pasar a ``calcular``."""
+    df_ml, df_odoo = crear_datos_ejemplo()
+    from utils import parse_fee_combo, parse_pct, extract_tax_percentage
+
+    df_ml['fee_pct'], df_ml['fee_fixed'] = zip(*df_ml['FEE_PER_SALE_MARKETPLACE_V2'].apply(parse_fee_combo))
+    df_ml['financing_pct'] = df_ml['COST_OF_FINANCING_MARKETPLACE'].apply(parse_pct)
+    df_odoo['tax_pct'] = df_odoo['Impuestos del cliente'].apply(extract_tax_percentage)
+
+    return unir_y_validar(df_ml, df_odoo)
 
 def test_procesamiento():
     """
@@ -161,6 +179,37 @@ def test_procesamiento():
         print(f"Recargo promedio %: {porcentaje_recargo:.1f}%")
     print("\n🎉 ¡Prueba completada exitosamente!")
     return df_resultado
+
+def test_recargo_envio_fijo_aplica_solo_a_envios_por_cuenta_propia():
+    df_merged = preparar_df_para_calculo()
+    df_calculado = calcular(df_merged, tipo_recargo_envio='Fijo ($)', valor_recargo_envio=150)
+
+    skus_con_recargo = set(df_calculado.loc[df_calculado['Recargo envío ($)'] > 0, 'SKU'])
+    skus_esperados = {'LED7012795', 'TCL45310'}
+    assert skus_con_recargo == skus_esperados
+
+    filas_sin_recargo = df_calculado[~df_calculado['SKU'].isin(skus_esperados)]['Recargo envío ($)']
+    assert all(isclose(valor, 0.0, abs_tol=1e-9) for valor in filas_sin_recargo)
+
+def test_recargo_envio_porcentaje_respeta_mascara():
+    df_merged = preparar_df_para_calculo()
+    df_calculado = calcular(df_merged, tipo_recargo_envio='Porcentaje (%)', valor_recargo_envio=10)
+
+    recargo_led = df_calculado.loc[df_calculado['SKU'] == 'LED7012795', 'Recargo envío ($)'].iloc[0]
+    recargo_modulo = df_calculado.loc[df_calculado['SKU'] == 'TCL45310', 'Recargo envío ($)'].iloc[0]
+    assert isclose(recargo_led, 1850.0, rel_tol=1e-4)
+    assert isclose(recargo_modulo, 18.41, rel_tol=1e-4)
+
+    otros = df_calculado[~df_calculado['SKU'].isin({'LED7012795', 'TCL45310'})]['Recargo envío ($)']
+    assert all(isclose(valor, 0.0, abs_tol=1e-9) for valor in otros)
+
+def test_recargo_envio_sin_columna_shipping_no_aplica():
+    df_merged = preparar_df_para_calculo()
+    df_sin_shipping = df_merged.drop(columns=['SHIPPING_METHOD '])
+    assert 'SHIPPING_METHOD ' not in df_sin_shipping.columns
+
+    df_calculado = calcular(df_sin_shipping, tipo_recargo_envio='Fijo ($)', valor_recargo_envio=200)
+    assert all(isclose(valor, 0.0, abs_tol=1e-9) for valor in df_calculado['Recargo envío ($)'])
 
 def test_parseo_individual():
     """
